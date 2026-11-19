@@ -40,4 +40,4 @@ $agentExe = Join-Path $agentDestination 'ParentalControl.Agent.exe'
 New-Item -Path 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run' -Force | Out-Null
 Set-ItemProperty -Path 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'ParentalControlAgent' -Value "`"$agentExe`""
 
-Write-Host 'Instalacja zakończona. Ustaw hasło i dzienne limity w C:\DD\config.txt, a następnie zaloguj się ponownie.'
+Write-Host 'Installation complete. Set the password and daily limits in C:\DD\config.txt, then sign in again.'
