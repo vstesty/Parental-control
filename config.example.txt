@@ -1,0 +1,11 @@
+# Haslo jest przechowywane jako tekst jawny. Dostep do folderu C:\DD ogranicza skrypt instalacyjny.
+Password=zmien-to-haslo
+
+# Dzienny limit czasu zalogowanej sesji; format HH:mm. Uzyj off, aby nie ograniczac dnia.
+Monday=02:00
+Tuesday=02:00
+Wednesday=02:00
+Thursday=02:00
+Friday=02:00
+Saturday=03:00
+Sunday=03:00
