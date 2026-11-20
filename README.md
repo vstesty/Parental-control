@@ -2,7 +2,9 @@
 
 Program dla Windows 11 składa się z usługi Windows i niewielkiego programu
 działającego w sesji użytkownika. Usługa mierzy dzienny czas aktywnej sesji
-konsoli i wylogowuje ją po wykorzystaniu limitu. Program użytkownika obsługuje
+konsoli i po wykorzystaniu limitu odczekuje 60 sekund przed wylogowaniem.
+Program użytkownika ostrzega 5 minut przed końcem limitu i pokazuje widoczne
+odliczanie w ostatnich 60 sekundach. Obsługuje
 skrót `Ctrl+H`; wpisanie hasła pozwala dodać 15, 30 lub 60 minut albo wyłączyć
 limit do końca dnia.
 

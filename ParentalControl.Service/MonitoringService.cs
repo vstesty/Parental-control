@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO.Pipes;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -12,7 +13,9 @@ internal sealed class MonitoringService(
     ILogger<MonitoringService> logger) : BackgroundService
 {
     private const string PipeName = "ParentalControl.Control";
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan LogoffGracePeriod = TimeSpan.FromSeconds(60);
+    private StatusSnapshot _status = new(null, null);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -24,8 +27,7 @@ internal sealed class MonitoringService(
         var previousSample = DateTime.UtcNow;
         var lastSaved = previousSample;
         uint? previousSession = null;
-        uint? logoffRequestedSession = null;
-        var lastLogoffAttempt = DateTime.MinValue;
+        DateTime? nextLogoffAttempt = null;
         var lastConfigurationWarning = DateTime.MinValue;
 
         while (!stoppingToken.IsCancellationRequested)
@@ -36,7 +38,7 @@ internal sealed class MonitoringService(
             {
                 today = currentDate;
                 policy.ResetFor(today);
-                logoffRequestedSession = null;
+                nextLogoffAttempt = null;
             }
 
             try
@@ -60,29 +62,42 @@ internal sealed class MonitoringService(
                 policy.AddUsage(utcNow - previousSample);
                 if (previousSession != activeSession)
                 {
-                    logoffRequestedSession = null;
+                    nextLogoffAttempt = null;
                 }
 
-                if (policy.IsOverLimit(configuration.GetLimit(now)) &&
-                    (logoffRequestedSession != activeSession ||
-                     utcNow - lastLogoffAttempt >= TimeSpan.FromMinutes(1)))
+                var remaining = policy.GetRemaining(configuration.GetLimit(now));
+                if (remaining is { } timeRemaining && timeRemaining <= TimeSpan.Zero)
                 {
-                    lastLogoffAttempt = utcNow;
-                    try
+                    nextLogoffAttempt ??= utcNow + LogoffGracePeriod;
+                    var graceRemaining = nextLogoffAttempt.Value - utcNow;
+                    if (graceRemaining <= TimeSpan.Zero)
                     {
-                        WindowsSession.Logoff(activeSession.Value);
-                        logoffRequestedSession = activeSession;
-                        logger.LogInformation("Limit dzienny został wykorzystany. Wylogowano sesję {SessionId}.", activeSession);
+                        try
+                        {
+                            WindowsSession.Logoff(activeSession.Value);
+                            logger.LogInformation("Limit dzienny został wykorzystany. Zlecono wylogowanie sesji {SessionId}.", activeSession);
+                        }
+                        catch (System.ComponentModel.Win32Exception exception)
+                        {
+                            logger.LogError(exception, "Nie udało się wylogować sesji {SessionId}.", activeSession);
+                        }
+
+                        nextLogoffAttempt = DateTime.UtcNow + LogoffGracePeriod;
+                        graceRemaining = LogoffGracePeriod;
                     }
-                    catch (System.ComponentModel.Win32Exception exception)
-                    {
-                        logger.LogError(exception, "Nie udało się wylogować sesji {SessionId}.", activeSession);
-                    }
+
+                    Volatile.Write(ref _status, new StatusSnapshot(null, graceRemaining.Ticks));
+                }
+                else
+                {
+                    nextLogoffAttempt = null;
+                    Volatile.Write(ref _status, new StatusSnapshot(remaining?.Ticks, null));
                 }
             }
             else
             {
-                logoffRequestedSession = null;
+                nextLogoffAttempt = null;
+                Volatile.Write(ref _status, new StatusSnapshot(null, null));
             }
 
             previousSession = activeSession;
@@ -111,7 +126,7 @@ internal sealed class MonitoringService(
                 using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true);
                 using var writer = new StreamWriter(pipe, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
                 var request = await reader.ReadLineAsync(cancellationToken);
-                var response = HandleRequest(request, getConfiguration());
+                var response = HandleRequest(request, getConfiguration);
                 await writer.WriteLineAsync(response);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -125,11 +140,21 @@ internal sealed class MonitoringService(
         }
     }
 
-    private string HandleRequest(string? request, AppConfiguration configuration)
+    private string HandleRequest(string? request, Func<AppConfiguration> getConfiguration)
     {
         if (request is null || request.Length > 8192)
         {
             return "INVALID";
+        }
+
+        if (request == "STATUS")
+        {
+            var status = Volatile.Read(ref _status);
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "STATUS|{0}|{1}",
+                status.RemainingTicks?.ToString(CultureInfo.InvariantCulture) ?? "-1",
+                status.LogoffTicks?.ToString(CultureInfo.InvariantCulture) ?? "-1");
         }
 
         var parts = request.Split('|', 3);
@@ -141,13 +166,15 @@ internal sealed class MonitoringService(
         try
         {
             var password = Encoding.UTF8.GetString(Convert.FromBase64String(parts[2]));
-            return policy.ApplyRequest(configuration, parts[1], password);
+            return policy.ApplyRequest(getConfiguration(), parts[1], password);
         }
         catch (FormatException)
         {
             return "INVALID";
         }
     }
+
+    private sealed record StatusSnapshot(long? RemainingTicks, long? LogoffTicks);
 
     private static NamedPipeServerStream CreatePipe()
     {

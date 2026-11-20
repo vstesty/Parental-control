@@ -78,11 +78,11 @@ internal sealed class DailyPolicy
         }
     }
 
-    public bool IsOverLimit(TimeSpan? configuredLimit)
+    public TimeSpan? GetRemaining(TimeSpan? configuredLimit)
     {
         lock (_lock)
         {
-            return !_disabled && configuredLimit is { } limit && _used >= limit + _extra;
+            return !_disabled && configuredLimit is { } limit ? limit + _extra - _used : null;
         }
     }
 

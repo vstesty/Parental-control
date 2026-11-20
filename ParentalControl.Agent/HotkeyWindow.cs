@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Diagnostics;
+using System.Globalization;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -11,6 +13,17 @@ internal sealed class HotkeyWindow : Form
     private const int WmHotkey = 0x0312;
     private const uint ModControl = 0x0002;
     private const uint VkH = 0x48;
+    private static readonly TimeSpan EarlyWarningThreshold = TimeSpan.FromMinutes(5);
+    private readonly System.Windows.Forms.Timer _statusTimer = new() { Interval = 1000 };
+    private readonly NotifyIcon _notifyIcon = new()
+    {
+        Icon = SystemIcons.Application,
+        Text = "Kontrola rodzicielska"
+    };
+    private readonly CountdownWindow _countdownWindow = new();
+    private bool _warningShown;
+    private bool _statusRequestInProgress;
+    private bool _serviceUnavailableReported;
 
     public HotkeyWindow()
     {
@@ -18,14 +31,27 @@ internal sealed class HotkeyWindow : Form
         FormBorderStyle = FormBorderStyle.FixedToolWindow;
         WindowState = FormWindowState.Minimized;
         Opacity = 0;
-        Load += (_, _) =>
+        _notifyIcon.Visible = true;
+        _statusTimer.Tick += async (_, _) => await PollStatusAsync();
+        Load += async (_, _) =>
         {
             if (!RegisterHotKey(Handle, HotkeyId, ModControl, VkH))
             {
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "Nie można zarejestrować skrótu Ctrl+H.");
             }
+
+            await PollStatusAsync();
+            _statusTimer.Start();
         };
-        FormClosed += (_, _) => UnregisterHotKey(Handle, HotkeyId);
+        FormClosed += (_, _) =>
+        {
+            _statusTimer.Stop();
+            _statusTimer.Dispose();
+            _notifyIcon.Visible = false;
+            _notifyIcon.Dispose();
+            _countdownWindow.CloseForApplicationExit();
+            UnregisterHotKey(Handle, HotkeyId);
+        };
     }
 
     protected override void WndProc(ref Message message)
@@ -77,6 +103,91 @@ internal sealed class HotkeyWindow : Form
             return "SERVICE_UNAVAILABLE";
         }
     }
+
+    private async Task PollStatusAsync()
+    {
+        if (_statusRequestInProgress)
+        {
+            return;
+        }
+
+        _statusRequestInProgress = true;
+        try
+        {
+            LimitStatus status;
+            try
+            {
+                status = await ReadStatusAsync();
+            }
+            catch (Exception exception) when (
+                exception is IOException or TimeoutException or UnauthorizedAccessException)
+            {
+                if (!_serviceUnavailableReported)
+                {
+                    Trace.TraceError(
+                        "Nie można odczytać statusu limitu z usługi kontroli rodzicielskiej: {0}",
+                        exception.Message);
+                    _serviceUnavailableReported = true;
+                }
+
+                return;
+            }
+
+            _serviceUnavailableReported = false;
+            if (status.LogoffRemaining is { } graceRemaining)
+            {
+                _countdownWindow.ShowCountdown(graceRemaining);
+                return;
+            }
+
+            _countdownWindow.HideCountdown();
+            if (status.LimitRemaining is { } remaining && remaining > TimeSpan.Zero &&
+                remaining <= EarlyWarningThreshold)
+            {
+                if (!_warningShown)
+                {
+                    _notifyIcon.ShowBalloonTip(
+                        10000,
+                        "Kontrola rodzicielska",
+                        "Limit czasu kończy się za mniej niż 5 minut. Zapisz swoją pracę.",
+                        ToolTipIcon.Warning);
+                    _warningShown = true;
+                }
+            }
+            else
+            {
+                _warningShown = false;
+            }
+        }
+        finally
+        {
+            _statusRequestInProgress = false;
+        }
+    }
+
+    private static async Task<LimitStatus> ReadStatusAsync()
+    {
+        await using var pipe = new NamedPipeClientStream(
+            ".", "ParentalControl.Control", PipeDirection.InOut, PipeOptions.Asynchronous);
+        await pipe.ConnectAsync(3000);
+        using var writer = new StreamWriter(pipe, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
+        using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true);
+        await writer.WriteLineAsync("STATUS");
+        var response = await reader.ReadLineAsync();
+        var parts = response?.Split('|');
+        if (parts is not { Length: 3 } || parts[0] != "STATUS" ||
+            !long.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var remainingTicks) ||
+            !long.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var logoffTicks))
+        {
+            throw new InvalidDataException("Usługa zwróciła nieprawidłowy status limitu.");
+        }
+
+        return new LimitStatus(
+            remainingTicks >= 0 ? TimeSpan.FromTicks(remainingTicks) : null,
+            logoffTicks >= 0 ? TimeSpan.FromTicks(logoffTicks) : null);
+    }
+
+    private sealed record LimitStatus(TimeSpan? LimitRemaining, TimeSpan? LogoffRemaining);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
