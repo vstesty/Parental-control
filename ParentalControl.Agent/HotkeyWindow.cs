@@ -18,7 +18,7 @@ internal sealed class HotkeyWindow : Form
     private readonly NotifyIcon _notifyIcon = new()
     {
         Icon = SystemIcons.Application,
-        Text = "Kontrola rodzicielska"
+        Text = "Guard"
     };
     private readonly CountdownWindow _countdownWindow = new();
     private bool _warningShown;
