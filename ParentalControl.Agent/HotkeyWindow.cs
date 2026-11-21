@@ -18,7 +18,7 @@ internal sealed class HotkeyWindow : Form
     private readonly NotifyIcon _notifyIcon = new()
     {
         Icon = SystemIcons.Application,
-        Text = "Kontrola rodzicielska"
+        Text = "Guard"
     };
     private readonly CountdownWindow _countdownWindow = new();
     private bool _warningShown;
@@ -60,35 +60,47 @@ internal sealed class HotkeyWindow : Form
     {
         if (message.Msg == WmHotkey && message.WParam.ToInt32() == HotkeyId)
         {
-            _extensionDialogOpen = true;
-            _countdownWindow.HideCountdown();
-            try
-            {
-                using var dialog = new ExtensionDialog(
-                    _lastStatus?.LimitRemaining,
-                    _lastStatus is not null);
-                if (dialog.ShowDialog() == DialogResult.OK)
-                {
-                    var response = SendRequestAsync(dialog.Action, dialog.Password).GetAwaiter().GetResult();
-                    var messageText = response switch
-                    {
-                        "OK" => "Zmieniono limit czasu na dzisiaj.",
-                        "DENIED" => "Nieprawidłowe hasło.",
-                        "NO_LIMIT" => "Limit na dzisiaj jest wyłączony w konfiguracji.",
-                        "SERVICE_UNAVAILABLE" => "Nie można połączyć się z usługą. Sprawdź, czy działa.",
-                        _ => "Nie udało się zmienić limitu. Sprawdź, czy usługa działa."
-                    };
-                    MessageBox.Show(messageText, "Kontrola rodzicielska", MessageBoxButtons.OK,
-                        response == "OK" ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
-                }
-            }
-            finally
-            {
-                _extensionDialogOpen = false;
-            }
+            HandleHotkeyAsync();
         }
 
         base.WndProc(ref message);
+    }
+
+    private async void HandleHotkeyAsync()
+    {
+        if (_extensionDialogOpen)
+        {
+            return;
+        }
+
+        _extensionDialogOpen = true;
+        _countdownWindow.HideCountdown();
+        try
+        {
+            using var dialog = new ExtensionDialog(
+                _lastStatus?.LimitRemaining,
+                _lastStatus is not null);
+            if (dialog.ShowDialog() != DialogResult.OK)
+            {
+                return;
+            }
+
+            var response = await SendRequestAsync(dialog.Action, dialog.Password);
+            var messageText = response switch
+            {
+                "OK" => "Zmieniono limit czasu na dzisiaj.",
+                "DENIED" => "Nieprawidłowe hasło.",
+                "NO_LIMIT" => "Limit na dzisiaj jest wyłączony w konfiguracji.",
+                "SERVICE_UNAVAILABLE" => "Nie można połączyć się z usługą. Sprawdź, czy działa.",
+                _ => "Nie udało się zmienić limitu. Sprawdź, czy usługa działa."
+            };
+            MessageBox.Show(messageText, "Kontrola rodzicielska", MessageBoxButtons.OK,
+                response == "OK" ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            _extensionDialogOpen = false;
+        }
     }
 
     private static async Task<string> SendRequestAsync(string action, string password)
