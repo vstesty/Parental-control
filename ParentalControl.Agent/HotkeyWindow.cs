@@ -24,6 +24,7 @@ internal sealed class HotkeyWindow : Form
     private bool _warningShown;
     private bool _statusRequestInProgress;
     private bool _serviceUnavailableReported;
+    private bool _extensionDialogOpen;
     private LimitStatus? _lastStatus;
 
     public HotkeyWindow()
@@ -59,22 +60,31 @@ internal sealed class HotkeyWindow : Form
     {
         if (message.Msg == WmHotkey && message.WParam.ToInt32() == HotkeyId)
         {
-            using var dialog = new ExtensionDialog(
-                _lastStatus?.LogoffRemaining,
-                _lastStatus is not null);
-            if (dialog.ShowDialog() == DialogResult.OK)
+            _extensionDialogOpen = true;
+            _countdownWindow.HideCountdown();
+            try
             {
-                var response = SendRequestAsync(dialog.Action, dialog.Password).GetAwaiter().GetResult();
-                var messageText = response switch
+                using var dialog = new ExtensionDialog(
+                    _lastStatus?.LimitRemaining,
+                    _lastStatus is not null);
+                if (dialog.ShowDialog() == DialogResult.OK)
                 {
-                    "OK" => "Zmieniono limit czasu na dzisiaj.",
-                    "DENIED" => "Nieprawidłowe hasło.",
-                    "NO_LIMIT" => "Limit na dzisiaj jest wyłączony w konfiguracji.",
-                    "SERVICE_UNAVAILABLE" => "Nie można połączyć się z usługą. Sprawdź, czy działa.",
-                    _ => "Nie udało się zmienić limitu. Sprawdź, czy usługa działa."
-                };
-                MessageBox.Show(messageText, "Kontrola rodzicielska", MessageBoxButtons.OK,
-                    response == "OK" ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                    var response = SendRequestAsync(dialog.Action, dialog.Password).GetAwaiter().GetResult();
+                    var messageText = response switch
+                    {
+                        "OK" => "Zmieniono limit czasu na dzisiaj.",
+                        "DENIED" => "Nieprawidłowe hasło.",
+                        "NO_LIMIT" => "Limit na dzisiaj jest wyłączony w konfiguracji.",
+                        "SERVICE_UNAVAILABLE" => "Nie można połączyć się z usługą. Sprawdź, czy działa.",
+                        _ => "Nie udało się zmienić limitu. Sprawdź, czy usługa działa."
+                    };
+                    MessageBox.Show(messageText, "Kontrola rodzicielska", MessageBoxButtons.OK,
+                        response == "OK" ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                }
+            }
+            finally
+            {
+                _extensionDialogOpen = false;
             }
         }
 
@@ -141,7 +151,15 @@ internal sealed class HotkeyWindow : Form
             _serviceUnavailableReported = false;
             if (status.LogoffRemaining is { } graceRemaining)
             {
-                _countdownWindow.ShowCountdown(graceRemaining);
+                if (_extensionDialogOpen)
+                {
+                    _countdownWindow.HideCountdown();
+                }
+                else
+                {
+                    _countdownWindow.ShowCountdown(graceRemaining);
+                }
+
                 return;
             }
 

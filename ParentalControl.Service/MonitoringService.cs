@@ -86,7 +86,9 @@ internal sealed class MonitoringService(
                         graceRemaining = LogoffGracePeriod;
                     }
 
-                    Volatile.Write(ref _status, new StatusSnapshot(null, graceRemaining.Ticks));
+                    Volatile.Write(ref _status, new StatusSnapshot(
+                        Math.Max(0, timeRemaining.Ticks),
+                        graceRemaining.Ticks));
                 }
                 else
                 {

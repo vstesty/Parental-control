@@ -3,19 +3,19 @@ namespace ParentalControl.Agent;
 internal sealed class ExtensionDialog : Form
 {
     private readonly TextBox _password = new();
-    private readonly Label _logoffRemaining = new()
+    private readonly Label _dailyLimitRemaining = new()
     {
         AutoSize = true,
         Location = new Point(12, 38)
     };
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 250 };
-    private readonly DateTime? _logoffDeadlineUtc;
+    private readonly DateTime? _dailyLimitDeadlineUtc;
     private readonly bool _statusAvailable;
 
     public string Password => _password.Text;
     public string Action { get; private set; } = "";
 
-    public ExtensionDialog(TimeSpan? logoffRemaining, bool statusAvailable)
+    public ExtensionDialog(TimeSpan? dailyLimitRemaining, bool statusAvailable)
     {
         Text = "Kontrola rodzicielska";
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -24,7 +24,7 @@ internal sealed class ExtensionDialog : Form
         MinimizeBox = false;
         KeyPreview = true;
         ClientSize = new Size(360, 180);
-        _logoffDeadlineUtc = logoffRemaining is { } remaining
+        _dailyLimitDeadlineUtc = dailyLimitRemaining is { } remaining
             ? DateTime.UtcNow + remaining
             : null;
         _statusAvailable = statusAvailable;
@@ -64,13 +64,13 @@ internal sealed class ExtensionDialog : Form
         };
 
         Controls.Add(versionLabel);
-        Controls.Add(_logoffRemaining);
+        Controls.Add(_dailyLimitRemaining);
         Controls.Add(passwordLabel);
         Controls.Add(_password);
         Controls.AddRange(buttons);
 
-        UpdateLogoffRemaining();
-        _timer.Tick += (_, _) => UpdateLogoffRemaining();
+        UpdateDailyLimitRemaining();
+        _timer.Tick += (_, _) => UpdateDailyLimitRemaining();
         _timer.Start();
         FormClosed += (_, _) => _timer.Dispose();
     }
@@ -99,22 +99,22 @@ internal sealed class ExtensionDialog : Form
         return button;
     }
 
-    private void UpdateLogoffRemaining()
+    private void UpdateDailyLimitRemaining()
     {
         if (!_statusAvailable)
         {
-            _logoffRemaining.Text = "Czas do wylogowania: brak danych";
+            _dailyLimitRemaining.Text = "Pozostały czas dziennego limitu: brak danych";
             return;
         }
 
-        if (_logoffDeadlineUtc is not { } deadline)
+        if (_dailyLimitDeadlineUtc is not { } deadline)
         {
-            _logoffRemaining.Text = "Czas do wylogowania: brak aktywnego odliczania";
+            _dailyLimitRemaining.Text = "Pozostały czas dziennego limitu: brak aktywnego limitu";
             return;
         }
 
         var seconds = Math.Max(0, (int)Math.Ceiling((deadline - DateTime.UtcNow).TotalSeconds));
-        _logoffRemaining.Text =
-            $"Czas do wylogowania: {seconds / 60:00}:{seconds % 60:00}";
+        _dailyLimitRemaining.Text =
+            $"Pozostały czas dziennego limitu: {seconds / 60:00}:{seconds % 60:00}";
     }
 }
