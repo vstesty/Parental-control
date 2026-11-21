@@ -6,7 +6,8 @@ konsoli i po wykorzystaniu limitu odczekuje 60 sekund przed wylogowaniem.
 Program użytkownika ostrzega 5 minut przed końcem limitu i pokazuje widoczne
 odliczanie w ostatnich 60 sekundach. Obsługuje
 skrót `Ctrl+H`; wpisanie hasła pozwala dodać 15, 30 lub 60 minut albo wyłączyć
-limit do końca dnia.
+limit do końca dnia. Okno skrótu pokazuje wersję programu (1.0) oraz czas
+pozostały do wylogowania, jeśli odliczanie jest aktywne.
 
 ## Konfiguracja
 

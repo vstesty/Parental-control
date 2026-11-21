@@ -24,6 +24,7 @@ internal sealed class HotkeyWindow : Form
     private bool _warningShown;
     private bool _statusRequestInProgress;
     private bool _serviceUnavailableReported;
+    private LimitStatus? _lastStatus;
 
     public HotkeyWindow()
     {
@@ -58,7 +59,9 @@ internal sealed class HotkeyWindow : Form
     {
         if (message.Msg == WmHotkey && message.WParam.ToInt32() == HotkeyId)
         {
-            using var dialog = new ExtensionDialog();
+            using var dialog = new ExtensionDialog(
+                _lastStatus?.LogoffRemaining,
+                _lastStatus is not null);
             if (dialog.ShowDialog() == DialogResult.OK)
             {
                 var response = SendRequestAsync(dialog.Action, dialog.Password).GetAwaiter().GetResult();
@@ -122,6 +125,7 @@ internal sealed class HotkeyWindow : Form
             catch (Exception exception) when (
                 exception is IOException or TimeoutException or UnauthorizedAccessException)
             {
+                _lastStatus = null;
                 if (!_serviceUnavailableReported)
                 {
                     Trace.TraceError(
@@ -133,6 +137,7 @@ internal sealed class HotkeyWindow : Form
                 return;
             }
 
+            _lastStatus = status;
             _serviceUnavailableReported = false;
             if (status.LogoffRemaining is { } graceRemaining)
             {
